@@ -1,7 +1,6 @@
-streamlit==1.26.0
-pandas==2.1.1
-numpy==1.26.2
-requests==2.31.0
-ta==0.10.2
-google-generativeai==0.4.0
-certifi
+streamlit
+requests
+pandas
+numpy
+ta
+google-generativeai
