@@ -1,0 +1,224 @@
+import streamlit as st
+import requests
+import pandas as pd
+import ta
+import numpy as np
+import os
+import google.generativeai as genai
+
+# 🔒 جلب المفتاح من Environment Variable
+api_key = os.getenv("GEMINI_API_KEY")
+if not api_key:
+    st.error("مفتاح Gemini API مش موجود! حط المفتاح في Secrets باسم GEMINI_API_KEY")
+    st.stop()
+
+genai.configure(api_key=api_key)
+
+st.set_page_config(layout="wide")
+st.title("🚀 Crypto AI Analyzer PRO - النسخة المحسّنة بالقوة")
+
+# اختيار مدة البيانات التاريخية
+days = st.selectbox("مدة البيانات التاريخية", ["90","365"])
+days = int(days)
+
+# دالة لجلب أقوى موديل يدعم generateContent
+def get_best_model():
+    models = genai.list_models()
+    for m in models:
+        if "generateContent" in m.supported_generation_methods:
+            return m.name
+    return None
+
+best_model = get_best_model()
+if not best_model:
+    st.error("❌ مفيش موديل يدعم generateContent في حسابك دلوقتي")
+    st.stop()
+st.info(f"الموديل المستخدم للتحليل AI: {best_model}")
+
+# ==================== فلتر أفضل 10 عملات ====================
+if st.button("فلتر أفضل 10 عملات"):
+    st.info("جلب أفضل 50 عملة من CoinGecko ...")
+    try:
+        coins_list = requests.get(
+            "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=50&page=1"
+        ).json()
+    except Exception as e:
+        st.error(f"❌ فشل في جلب قائمة العملات: {e}")
+        coins_list = []
+
+    top_coins = []
+
+    for c in coins_list:
+        try:
+            coin_symbol = c.get('symbol', '').upper()
+            coin_id = c.get('id', '')
+            if not coin_symbol or not coin_id:
+                continue
+        except:
+            continue
+
+        # جلب البيانات التاريخية من CryptoCompare
+        try:
+            url = f"https://min-api.cryptocompare.com/data/v2/histoday?fsym={coin_symbol}&tsym=USD&limit={days}"
+            r = requests.get(url).json()
+            df = pd.DataFrame(r["Data"]["Data"])
+            if len(df) < 20:
+                continue
+        except:
+            continue
+
+        price = df["close"].iloc[-1]
+        volume = df["volumeto"].iloc[-1]
+
+        # مؤشرات فنية
+        df["RSI"] = ta.momentum.RSIIndicator(df["close"]).rsi()
+        ema20 = ta.trend.EMAIndicator(df["close"], window=20)
+        ema50 = ta.trend.EMAIndicator(df["close"], window=50)
+        macd = ta.trend.MACD(df["close"])
+        df["EMA20"] = ema20.ema_indicator()
+        df["EMA50"] = ema50.ema_indicator()
+        df["MACD"] = macd.macd()
+        df["MACD_SIGNAL"] = macd.macd_signal()
+
+        rsi = df["RSI"].iloc[-1]
+        ema20_val = df["EMA20"].iloc[-1]
+        ema50_val = df["EMA50"].iloc[-1]
+        macd_val = df["MACD"].iloc[-1]
+        macd_signal = df["MACD_SIGNAL"].iloc[-1]
+
+        # Volume Profile
+        vp = df.groupby(pd.cut(df["close"], 20))["volumeto"].sum()
+        vp_zone = vp.idxmax()
+        vp_range = f"{vp_zone.left:.2f} - {vp_zone.right:.2f} USD"
+
+        volume_spike = volume > df["volumeto"].mean() * 2
+        whale_flag = "🚨 تجمع حيتان" if volume_spike else ""
+
+        # MarketCap و Rank
+        try:
+            cg = requests.get(f"https://api.coingecko.com/api/v3/coins/{coin_id}").json()
+            marketcap = cg.get("market_data", {}).get("market_cap", {}).get("usd", None)
+            rank = cg.get("market_cap_rank", None)
+            if marketcap is None or rank is None:
+                continue
+        except:
+            continue
+
+        # Score
+        score = 0
+        if rsi < 35: score += 2
+        if ema20_val > ema50_val: score += 2
+        if macd_val > macd_signal: score += 2
+        if volume_spike: score += 2
+        if rank < 100: score += 2
+
+        top_coins.append({
+            "symbol": coin_symbol,
+            "id": coin_id,
+            "price": price,
+            "marketcap": marketcap,
+            "volume": volume,
+            "rank": rank,
+            "RSI": rsi,
+            "EMA20": ema20_val,
+            "EMA50": ema50_val,
+            "MACD": macd_val,
+            "VolumeProfile": vp_range,
+            "Score": score,
+            "Whale": whale_flag
+        })
+
+    # ترتيب العملات حسب Score
+    top_coins = sorted(top_coins, key=lambda x: x["Score"], reverse=True)
+    top_10 = top_coins[:10]
+
+    st.subheader("🏆 أفضل 10 عملات حسب Score")
+
+    for i, coin in enumerate(top_10,1):
+        st.write(f"### {i}. {coin['symbol']} - Score: {coin['Score']} - السعر: {coin['price']}$ - Rank: {coin['rank']}")
+        st.write("📊 بيانات إضافية:")
+        st.write(f"Market Cap: {coin['marketcap']}")
+        st.write(f"Volume: {coin['volume']}")
+        st.write(f"RSI: {round(coin['RSI'],2)} | EMA20: {round(coin['EMA20'],2)} | EMA50: {round(coin['EMA50'],2)} | MACD: {round(coin['MACD'],2)}")
+        st.write(f"Volume Profile Zone: {coin['VolumeProfile']}")
+        if coin["Whale"]:
+            st.success(coin["Whale"])
+        
+        # زر تحليل AI لكل عملة
+        if st.button(f"🤖 حلل AI - {coin['symbol']}", key=f"ai_{coin['symbol']}"):
+            prompt = f"""
+            حلل العملة التالية:
+            Coin: {coin['symbol']}
+            Price: {coin['price']}
+            Volume: {coin['volume']}
+            MarketCap: {coin['marketcap']}
+            Rank: {coin['rank']}
+            RSI: {coin['RSI']}
+            EMA20: {coin['EMA20']}
+            EMA50: {coin['EMA50']}
+            MACD: {coin['MACD']}
+            VolumeProfile: {coin['VolumeProfile']}
+            Score: {coin['Score']}/10
+
+            اكتب تقرير كامل يشمل:
+            - الاتجاه
+            - الدعم والمقاومة
+            - أفضل نقطة شراء
+            - الهدف
+            - وقف الخسارة
+            - توقع الحركة القادمة
+            """
+            with st.spinner("جاري تحليل AI ..."):
+                try:
+                    model = genai.GenerativeModel(best_model)
+                    response = model.generate_content(prompt)
+                    st.write(response.text)
+                except Exception as e:
+                    st.error(f"❌ حدث خطأ في جلب تحليل AI: {e}")
+
+# ==================== خانة بحث عن أي عملة ====================
+st.subheader("🔎 ابحث عن عملة معينة")
+
+user_coin = st.text_input("اكتب رمز العملة هنا (مثل BTC أو ETH)").upper()
+
+if user_coin:
+    try:
+        # جلب بيانات العملة من CoinGecko
+        coin_data = requests.get(f"https://api.coingecko.com/api/v3/coins/{user_coin.lower()}").json()
+        marketcap = coin_data.get("market_data", {}).get("market_cap", {}).get("usd", None)
+        price = coin_data.get("market_data", {}).get("current_price", {}).get("usd", None)
+        volume = coin_data.get("market_data", {}).get("total_volume", {}).get("usd", None)
+        rank = coin_data.get("market_cap_rank", None)
+
+        st.write(f"### {user_coin} - السعر: {price}$ - Rank: {rank}")
+        st.write(f"Market Cap: {marketcap}")
+        st.write(f"Volume: {volume}")
+
+        # زر تحليل AI للعملة
+        if st.button(f"🤖 حلل AI - {user_coin}", key=f"user_ai_{user_coin}"):
+            prompt = f"""
+            حلل العملة التالية:
+            Coin: {user_coin}
+            Price: {price}
+            Volume: {volume}
+            MarketCap: {marketcap}
+            Rank: {rank}
+
+            اكتب تقرير كامل يشمل:
+            - الاتجاه
+            - الدعم والمقاومة
+            - أفضل نقطة شراء
+            - الهدف
+            - وقف الخسارة
+            - توقع الحركة القادمة
+            """
+            with st.spinner("جاري تحليل AI ..."):
+                try:
+                    model = genai.GenerativeModel(best_model)
+                    response = model.generate_content(prompt)
+                    st.write(response.text)
+                except Exception as e:
+                    st.error(f"❌ حدث خطأ في جلب تحليل AI: {e}")
+
+    except Exception as e:
+        st.error(f"❌ حدث خطأ في جلب بيانات العملة: {e}")
