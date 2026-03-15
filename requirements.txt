@@ -1,6 +1,4 @@
 streamlit
 requests
 pandas
-numpy
-ta
-google-generativeai
+matplotlib
