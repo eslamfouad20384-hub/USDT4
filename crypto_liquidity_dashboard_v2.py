@@ -1,4 +1,4 @@
-# crypto_market_dashboard_ar.py
+# crypto_whale_dashboard_ar.py
 
 import streamlit as st
 import requests
@@ -6,12 +6,11 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import datetime
 
-st.set_page_config(page_title="لوحة تحكم السوق والمؤشرات", layout="wide")
-
-st.title("📊 لوحة تحكم السوق - السيولة وحالة الخوف والطمع ونوايا الحيتان")
+st.set_page_config(page_title="لوحة تحكم الحيتان والسوق", layout="wide")
+st.title("🦈 لوحة تحكم الحيتان وحالة السوق - بالعربي")
 
 # -----------------------------
-# بيانات السيولة وحجم التداول الإجمالي (تقريبي) - نستخدم CoinGecko Top 100
+# 1️⃣ السيولة العامة (Liquidity Flow)
 # -----------------------------
 @st.cache_data(ttl=300)
 def get_total_market_volume():
@@ -21,11 +20,10 @@ def get_total_market_volume():
         data = response.json()
         total_vol = data['data']['total_volume']['usd']
         return total_vol
-    else:
-        return None
+    return None
 
 # -----------------------------
-# مؤشر الخوف والطمع
+# 2️⃣ مؤشر الخوف والطمع
 # -----------------------------
 @st.cache_data(ttl=600)
 def get_fear_greed_index():
@@ -34,26 +32,20 @@ def get_fear_greed_index():
     if response.status_code == 200:
         data = response.json()
         value = int(data['data'][0]['value'])
-        classification_en = data['data'][0]['value_classification']
-        # تحويل التصنيف العربي
-        if classification_en.lower() in ["extreme fear"]:
-            classification_ar = "خوف شديد"
-        elif classification_en.lower() in ["fear"]:
-            classification_ar = "خوف"
-        elif classification_en.lower() in ["neutral"]:
-            classification_ar = "حياد"
-        elif classification_en.lower() in ["greed"]:
-            classification_ar = "طمع"
-        elif classification_en.lower() in ["extreme greed"]:
-            classification_ar = "طمع شديد"
-        else:
-            classification_ar = classification_en
-        return value, classification_ar
-    else:
-        return None, None
+        class_en = data['data'][0]['value_classification']
+        mapping = {
+            "extreme fear": "خوف شديد",
+            "fear": "خوف",
+            "neutral": "حياد",
+            "greed": "طمع",
+            "extreme greed": "طمع شديد"
+        }
+        class_ar = mapping.get(class_en.lower(), class_en)
+        return value, class_ar
+    return None, None
 
 # -----------------------------
-# تحركات الحيتان - بيانات تقريبية (CoinGecko Top 10 حجم التداول)
+# 3️⃣ نشاط الحيتان (Top 10 Coins as approximation)
 # -----------------------------
 @st.cache_data(ttl=300)
 def get_whale_activity():
@@ -67,16 +59,14 @@ def get_whale_activity():
     }
     response = requests.get(url, params=params)
     if response.status_code == 200:
-        data = response.json()
-        df = pd.DataFrame(data)
-        df = df[['name', 'symbol', 'total_volume']]
+        df = pd.DataFrame(response.json())
+        df = df[['name','symbol','total_volume']]
         df['volume_million'] = df['total_volume'] / 1_000_000
         return df
-    else:
-        return None
+    return None
 
 # -----------------------------
-# Stablecoin Dominance
+# 4️⃣ Stablecoin Dominance
 # -----------------------------
 @st.cache_data(ttl=300)
 def get_stablecoin_dominance():
@@ -84,28 +74,35 @@ def get_stablecoin_dominance():
     response = requests.get(url)
     if response.status_code == 200:
         data = response.json()
-        btc_dominance = data['data']['market_cap_percentage']['btc']
-        eth_dominance = data['data']['market_cap_percentage']['eth']
-        stablecoin_dominance = data['data']['market_cap_percentage']['usdt'] + data['data']['market_cap_percentage'].get('usdc',0)
-        return stablecoin_dominance, btc_dominance, eth_dominance
-    else:
-        return None, None, None
+        market = data['data']['market_cap_percentage']
+        stable_d = market.get('usdt',0) + market.get('usdc',0)
+        btc_d = market.get('btc',0)
+        eth_d = market.get('eth',0)
+        return stable_d, btc_d, eth_d
+    return None, None, None
+
+# -----------------------------
+# 5️⃣ Exchange Flow approximation (In/Out)
+# -----------------------------
+@st.cache_data(ttl=300)
+def get_exchange_flow():
+    # تقريب: نستخدم الحجم الكلي كبديل لتدفقات دخول وخروج
+    # في نسخة كاملة ممكن تستخدم APIs من CryptoQuant أو Glassnode
+    total_volume = get_total_market_volume()
+    # تخيل أن 55% داخلة، 45% خارجة
+    inflow = total_volume * 0.55
+    outflow = total_volume * 0.45
+    return inflow, outflow
 
 # -----------------------------
 # زر التحديث
 # -----------------------------
 if st.button("تحديث كل المؤشرات"):
-    total_volume = get_total_market_volume()
-    fear_greed_value, fear_greed_class = get_fear_greed_index()
-    whale_df = get_whale_activity()
-    stable_d, btc_d, eth_d = get_stablecoin_dominance()
-    
-    # -----------------------------
-    # تفسير السيولة
-    # -----------------------------
-    liquidity_threshold = 25_000_000_000  # 25 مليار دولار كمثال للسيولة عالية
-    if total_volume is not None:
-        if total_volume > liquidity_threshold:
+    # سيولة
+    total_vol = get_total_market_volume()
+    liquidity_threshold = 25_000_000_000
+    if total_vol is not None:
+        if total_vol > liquidity_threshold:
             liquidity_signal = "داخل سيولة السوق"
             liquidity_color = "green"
             liquidity_emoji = "🟢"
@@ -115,33 +112,29 @@ if st.button("تحديث كل المؤشرات"):
             liquidity_emoji = "🔴"
         st.subheader("💧 السيولة العامة")
         st.markdown(f"<h2 style='color:{liquidity_color}'>{liquidity_emoji} {liquidity_signal}</h2>", unsafe_allow_html=True)
-        st.write(f"حجم التداول الإجمالي في السوق: ${total_volume:,.0f}")
-    
-    # -----------------------------
-    # مؤشر الخوف والطمع
-    # -----------------------------
-    if fear_greed_value is not None:
-        fg_color = "green" if fear_greed_class in ["طمع", "حياد"] else "red"
+        st.write(f"حجم التداول الإجمالي: ${total_vol:,.0f}")
+
+    # الخوف والطمع
+    fg_value, fg_class = get_fear_greed_index()
+    if fg_value is not None:
+        fg_color = "green" if fg_class in ["طمع","حياد"] else "red"
         st.subheader("😎 مؤشر الخوف والطمع")
-        st.markdown(f"<h2 style='color:{fg_color}'>{fear_greed_value} ({fear_greed_class})</h2>", unsafe_allow_html=True)
-        # التفسير بالعربي
+        st.markdown(f"<h2 style='color:{fg_color}'>{fg_value} ({fg_class})</h2>", unsafe_allow_html=True)
         st.write("""
         **تفسير المؤشر:**  
-        - 0-20: خوف شديد → السوق هابط، قد تكون فرصة شراء على المدى الطويل  
+        - 0-20: خوف شديد → السوق هابط، فرصة شراء على المدى الطويل  
         - 21-40: خوف → السوق متردد، الحذر مطلوب  
         - 41-60: حياد → السوق متوازن، متابعة السوق  
         - 61-80: طمع → السوق صاعد، قد يكون وقت بيع جزئي  
         - 81-100: طمع شديد → السوق متحمس جدًا، خطر تضخم الفقاعة
         """)
-    
-    # -----------------------------
-    # تحركات الحيتان
-    # -----------------------------
+
+    # نشاط الحيتان
+    whale_df = get_whale_activity()
     if whale_df is not None:
-        st.subheader("🐋 نشاط الحيتان (Top 10 Market Cap)")
-        st.write("حجم التداول لكل عملة بالملايين:")
-        st.dataframe(whale_df[['name', 'symbol', 'volume_million']])
-        # رسم بياني
+        st.subheader("🐋 نشاط الحيتان (Top 10 Coins تقريبًا)")
+        st.write("حجم التداول بالملايين:")
+        st.dataframe(whale_df[['name','symbol','volume_million']])
         st.subheader("📊 رسم بياني لنشاط الحيتان")
         fig, ax = plt.subplots(figsize=(8,3))
         ax.bar(whale_df['symbol'], whale_df['volume_million'], color='blue')
@@ -149,10 +142,9 @@ if st.button("تحديث كل المؤشرات"):
         ax.set_xlabel("رمز العملة")
         ax.set_title("نشاط الحيتان تقريبياً")
         st.pyplot(fig)
-    
-    # -----------------------------
+
     # Stablecoin Dominance
-    # -----------------------------
+    stable_d, btc_d, eth_d = get_stablecoin_dominance()
     if stable_d is not None:
         st.subheader("💵 سيطرة الستابل كوين")
         st.write(f"نسبة الستابل كوين في السوق: {stable_d:.2f}%")
@@ -160,15 +152,25 @@ if st.button("تحديث كل المؤشرات"):
             st.write("🟢 السيولة جاهزة للدخول → احتمال صعود السوق")
         else:
             st.write("🔴 السيولة ضعيفة → السوق ممكن يهبط أو متذبذب")
-    
+
+    # Exchange Flow
+    inflow, outflow = get_exchange_flow()
+    st.subheader("🏦 تقريب تدفقات البورصات (Inflow/Outflow)")
+    st.write(f"تقريب السيولة الداخلة: ${inflow:,.0f}")
+    st.write(f"تقريب السيولة الخارجة: ${outflow:,.0f}")
+    if inflow > outflow:
+        st.write("🟢 تدفقات داخل البورصات أقل من الخارج → السوق متجه صعود")
+    else:
+        st.write("🔴 تدفقات داخل البورصات أعلى → ضغط بيع محتمل")
+
     # -----------------------------
-    # التوصية العامة
+    # التوصية العامة بالعربي
     # -----------------------------
     st.subheader("📝 التوصية العامة")
-    if liquidity_color == "green" and fear_greed_class in ["حياد", "طمع"] and stable_d > 10:
-        recommendation = "✅ السوق داخله سيولة، وقت مناسب للشراء أو الثبات"
-    elif liquidity_color == "red" and fear_greed_class in ["خوف"]:
-        recommendation = "⚠️ الحذر، السوق ضعيف لكن قد توجد فرصة للشراء على المدى الطويل"
+    if liquidity_color == "green" and fg_class in ["حياد","طمع"] and stable_d>10:
+        rec = "✅ السوق داخله سيولة، وقت مناسب للشراء أو الثبات"
+    elif liquidity_color=="red" and fg_class in ["خوف"]:
+        rec = "⚠️ الحذر، السوق ضعيف لكن قد توجد فرصة شراء على المدى الطويل"
     else:
-        recommendation = "🟡 راقب السوق وانتظر الفرصة المناسبة"
-    st.write(recommendation)
+        rec = "🟡 راقب السوق وانتظر الفرصة المناسبة"
+    st.write(rec)
